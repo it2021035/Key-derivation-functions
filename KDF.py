@@ -1,3 +1,5 @@
+import tkinter as tk
+from tkinter import filedialog
 import os
 from argon2 import PasswordHasher
 from cryptography.hazmat.primitives import hashes
@@ -13,6 +15,7 @@ SALT_SIZE = 16  # Length of the salt used for key derivation
 # Use Argon2id for KDF (Password hashing)
 def derive_key(password: str, salt: bytes) -> bytes:
     ph = PasswordHasher(time_cost=2, memory_cost=2**16, parallelism=1)
+    print(ph.hash(password + salt.hex()))
     return ph.hash(password + salt.hex())  # Derive key using the password and salt
 
 # AES-GCM Encryption (for confidentiality and integrity)
@@ -74,16 +77,18 @@ def rotate_key(salt: bytes, password: str) -> bytes:
     # You can alter salt or use a timestamp to change the key periodically
     return derive_key(password, salt)
 
- 
-import tkinter as tk
-from tkinter import filedialog
 
-root = tk.Tk()
-root.withdraw()  # Hide the main window
+def fileSelector():
+    root = tk.Tk()
+    root.withdraw()  # Hide the main window
 
-fileToEncrypt = filedialog.askopenfile(
-    parent=root,
-    initialdir="/",
-    title='Please select file to be encrypted'
-)
+    fileToEncrypt = filedialog.askopenfile(
+        parent=root,
+        initialdir="/",
+        title='Please select file to be encrypted')
+    return fileToEncrypt.name    
 
+fileToEncrypt = fileSelector()
+
+password = input("Please provide the passwordfor the file:\n")
+encrypt_file(fileToEncrypt,password)
