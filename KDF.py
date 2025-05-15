@@ -1,67 +1,77 @@
 import tkinter as tk
 from tkinter import filedialog
 import os
-from argon2 import PasswordHasher
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.hmac import HMAC
-from cryptography.hazmat.primitives import padding
 from argon2.low_level import hash_secret_raw, Type
 
 # Constants
-AES_BLOCK_SIZE = 16  # Block size for AES encryption
-SALT_SIZE = 16  # Length of the salt used for key derivation
+SALT_SIZE   = 16   # bytes
+NONCE_SIZE  = 12   # bytes
+TAG_SIZE    = 16   # bytes
+LEVEL_BYTES = 2    # θα κρατήσουμε το security_level σε 2 bytes
+
+def choose_security_level():
+    print("Select security level (bits):")
+    print("1. 128")
+    print("2. 256")
+    choice = input("> ")
+    mapping = {'1': '128', '2': '256'}
+    bits = mapping.get(choice, '256')
+    return int(bits)
 
 # Use Argon2id for KDF (Password hashing)
-
-def derive_key(password: str, salt: bytes) -> bytes:
+def derive_key(password: str, salt: bytes, security_level: int) -> bytes:
     return hash_secret_raw(
         secret=password.encode(),
         salt=salt,
         time_cost=2,
         memory_cost=2**16,
         parallelism=1,
-        hash_len=32,  # AES-256
+        hash_len=security_level//8,  
         type=Type.ID
     )
 # AES-GCM Encryption (for confidentiality and integrity)
-def encrypt_file(file_path: str, password: str):
+def encrypt_file(file_path: str, password: str , security_level: int):
     salt = os.urandom(SALT_SIZE)  # Generate a random salt for key derivation
-    key = derive_key(password, salt)
+    key = derive_key(password, salt ,security_level)
 
     with open(file_path, 'rb') as f:
         data = f.read()
 
     # AES-GCM encryption setup
-    nonce = os.urandom(12)  # Random nonce
+    nonce = os.urandom(NONCE_SIZE)  # Random nonce
     cipher = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend())
     encryptor = cipher.encryptor()
     encrypted_data = encryptor.update(data) + encryptor.finalize()
 
+    level_bytes = security_level.to_bytes(2, byteorder='big')
+
     # Store metadata (salt + nonce + tag) for later use
     with open(file_path, 'wb') as f:
-        f.write(salt + nonce + encryptor.tag + encrypted_data)
+        f.write(salt + nonce + encryptor.tag + level_bytes + encrypted_data)
 
 # AES-GCM Decryption
 def decrypt_file(file_path: str, password: str):
     with open(file_path, 'rb') as f:
-        metadata = f.read(44)  # 16 (salt) + 12 (nonce) + 16 (tag)
-        encrypted_data = f.read()
+        salt       = f.read(SALT_SIZE)
+        nonce      = f.read(NONCE_SIZE)
+        tag        = f.read(TAG_SIZE)
+        level_bytes= f.read(LEVEL_BYTES)
+        ciphertext = f.read()
 
-    salt = metadata[:SALT_SIZE]
-    nonce = metadata[SALT_SIZE:SALT_SIZE+12]
-    tag = metadata[SALT_SIZE+12:SALT_SIZE+28]
+    security_level = int.from_bytes(level_bytes, byteorder='big')
 
-    key = derive_key(password, salt)
+    key = derive_key(password, salt, security_level)
 
-    # AES-GCM decryption setup
     cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag), backend=default_backend())
-    decryptor = cipher.decryptor()
-    decrypted_data = decryptor.update(encrypted_data) + decryptor.finalize()
+    dec    = cipher.decryptor()
+    plaintext = dec.update(ciphertext) + dec.finalize()
 
-    with open(file_path, 'wb') as dec_file:
-        dec_file.write(decrypted_data)
+    with open(file_path, 'wb') as f:
+        f.write(plaintext)
 
 # HMAC for Integrity Protection
 def generate_mac(file_path: str, password: str) -> bytes:
@@ -113,6 +123,9 @@ def fileSelector():
         title='Please select file to be encrypted')
     return chosenFIle.name    
 
+
+
+
 while True:
     Uinput = input("Do you want:\n"+
                     "1. Encrypt file\n"+
@@ -120,7 +133,7 @@ while True:
                     "3. Protect file integrity\n"+
                     "4. Verify file integrity\n"+
                     "5. Change Password for file\n"
-                    "0. Exit\n")
+                    "0. Exit\n>")
     
     if Uinput == '0':
         break
@@ -131,7 +144,8 @@ while True:
 
     match Uinput:
         case '1':
-            encrypt_file(chosenFIle,password)
+            security_level = choose_security_level()
+            encrypt_file(chosenFIle, password, security_level)
         
         case '2':
             decrypt_file(chosenFIle,password)
@@ -145,8 +159,8 @@ while True:
         case '5':
             decrypt_file(chosenFIle,password)
             new_pass = input("Enter new Password:\n")
-            encrypt_file(chosenFIle,new_pass)
-
+            security_level = choose_security_level()
+            encrypt_file(chosenFIle, password, security_level)
         case _:
             print("Please input a number between 0 - 5")        
 
