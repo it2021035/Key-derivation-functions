@@ -8,10 +8,10 @@ from cryptography.hazmat.primitives.hmac import HMAC
 from argon2.low_level import hash_secret_raw, Type
 
 # Constants
-SALT_SIZE   = 16   # bytes
-NONCE_SIZE  = 12   # bytes
-TAG_SIZE    = 16   # bytes
-LEVEL_BYTES = 2    # θα κρατήσουμε το security_level σε 2 bytes
+SALT_SIZE   = 16  
+NONCE_SIZE  = 12  
+TAG_SIZE    = 16   
+LEVEL_BYTES = 2    
 
 def choose_security_level():
     print("Select security level (bits):")
@@ -74,9 +74,9 @@ def decrypt_file(file_path: str, password: str):
         f.write(plaintext)
 
 # HMAC for Integrity Protection
-def generate_mac(file_path: str, password: str) -> bytes:
+def generate_mac(file_path: str, password: str,security_level: int) -> bytes:
     salt = os.urandom(SALT_SIZE)  # Random salt for MAC
-    key = derive_key(password, salt)
+    key = derive_key(password, salt, security_level)
     hmac = HMAC(key, hashes.SHA256(), backend=default_backend())
 
     with open(file_path, 'rb') as f:
@@ -85,32 +85,34 @@ def generate_mac(file_path: str, password: str) -> bytes:
         
     return hmac.finalize() , salt
 
-def protect_file_integrity(file_path: str, password: str):
-    mac, salt = generate_mac(file_path, password)
+def protect_file_integrity(file_path: str, password: str,security_level: int):
+    mac, salt = generate_mac(file_path, password, security_level)
+    level_bytes = security_level.to_bytes(2, byteorder='big')
 
     with open(file_path + ".mac", 'wb') as f:
-        f.write(salt + mac)
-
+        f.write(salt + mac + level_bytes)
     print(f"Integrity tag stored in {file_path}.mac")
 
 def verify_file_integrity(file_path: str, password: str):
     with open(file_path + ".mac", 'rb') as f:
         data = f.read()
         salt = data[:SALT_SIZE]
-        expected_mac = data[SALT_SIZE:]
+        mac = data[SALT_SIZE:SALT_SIZE + 32]  # ακριβώς 32 bytes για SHA256
+        level_bytes = data[-2:]
+        security_level = int.from_bytes(level_bytes, byteorder='big')
 
-    key = derive_key(password, salt)
+    key = derive_key(password, salt, security_level)
     h = HMAC(key, hashes.SHA256(), backend=default_backend())
 
     with open(file_path, 'rb') as f:
         h.update(f.read())
 
     try:
-        h.verify(expected_mac)
-        print("[✓] File integrity: VALID")
+        h.verify(mac)
+        print("File integrity: VALID")
         return True
     except Exception:
-        print("[✗] File integrity: INVALID or wrong password")
+        print("File integrity: INVALID or wrong password")
         return False
 
 def fileSelector():
@@ -151,7 +153,8 @@ while True:
             decrypt_file(chosenFIle,password)
 
         case '3':
-            protect_file_integrity(chosenFIle,password)
+            security_level = choose_security_level()
+            protect_file_integrity(chosenFIle,password,security_level)
 
         case '4':
             verify_file_integrity(chosenFIle,password)
